@@ -16,18 +16,22 @@ android {
         applicationId = "com.example.moneymanager"
         minSdk = 36
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 6
+        versionName = "1.0.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
         release {
-            optimization {
-                enable = true
-                packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
-            }
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            // Signs the release build with your local debug key so it installs directly:
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {

@@ -4,9 +4,19 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.only
@@ -23,6 +33,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.example.moneymanager.core.repository.ThemeMode
 import com.example.moneymanager.ui.screens.AddScheduledTransactionScreen
 import com.example.moneymanager.ui.screens.AddTransactionScreen
 import com.example.moneymanager.ui.screens.BulkAddScreen
@@ -42,13 +53,21 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MoneyManagerTheme {
+            val viewModel: MoneyViewModel = hiltViewModel()
+            val themeMode by viewModel.themeMode.collectAsState()
+
+            val useDarkTheme = when (themeMode) {
+                ThemeMode.SYSTEM -> isSystemInDarkTheme()
+                ThemeMode.LIGHT -> false
+                ThemeMode.DARK -> true
+            }
+
+            MoneyManagerTheme(darkTheme = useDarkTheme) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background,
                 ) {
                     val navController = rememberNavController()
-                    val viewModel: MoneyViewModel = hiltViewModel()
 
                     val navBackStackEntry by navController.currentBackStackEntryAsState()
                     val currentRoute = navBackStackEntry?.destination?.route
@@ -56,28 +75,65 @@ class MainActivity : ComponentActivity() {
                     val bottomNavRoutes = listOf("dashboard", "monthly", "settings")
                     val showBottomNav = currentRoute in bottomNavRoutes
 
+                    val animatedBottomPadding by animateDpAsState(
+                        targetValue = if (showBottomNav) 68.dp else 0.dp,
+                        animationSpec = tween(150),
+                        label = "bottomPadding"
+                    )
+
                     Scaffold(
                         contentWindowInsets = WindowInsets(0, 0, 0, 0),
                         bottomBar = {
-                            if (showBottomNav) {
-                                NavigationBar {
+                            AnimatedVisibility(
+                                visible = showBottomNav,
+                                enter = slideInVertically(animationSpec = tween(150)) { it } + fadeIn(animationSpec = tween(150)),
+                                exit = slideOutVertically(animationSpec = tween(150)) { it } + fadeOut(animationSpec = tween(150))
+                            ) {
+                                NavigationBar(
+                                    modifier = Modifier.height(72.dp),
+                                    windowInsets = WindowInsets(0, 8, 0, 0)
+                                ) {
                                     NavigationBarItem(
                                         icon = { Icon(Icons.Default.Home, contentDescription = "Home") },
                                         label = { Text("Home") },
                                         selected = currentRoute == "dashboard",
-                                        onClick = { navController.navigate("dashboard") { launchSingleTop = true } }
+                                        onClick = {
+                                            if (currentRoute != "dashboard") {
+                                                navController.navigate("dashboard") {
+                                                    popUpTo(navController.graph.startDestinationId) { saveState = true }
+                                                    launchSingleTop = true
+                                                    restoreState = true
+                                                }
+                                            }
+                                        }
                                     )
                                     NavigationBarItem(
                                         icon = { Icon(Icons.Default.PieChart, contentDescription = "Monthly") },
                                         label = { Text("Monthly") },
                                         selected = currentRoute == "monthly",
-                                        onClick = { navController.navigate("monthly") { launchSingleTop = true } }
+                                        onClick = {
+                                            if (currentRoute != "monthly") {
+                                                navController.navigate("monthly") {
+                                                    popUpTo(navController.graph.startDestinationId) { saveState = true }
+                                                    launchSingleTop = true
+                                                    restoreState = true
+                                                }
+                                            }
+                                        }
                                     )
                                     NavigationBarItem(
                                         icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
                                         label = { Text("Settings") },
                                         selected = currentRoute == "settings",
-                                        onClick = { navController.navigate("settings") { launchSingleTop = true } }
+                                        onClick = {
+                                            if (currentRoute != "settings") {
+                                                navController.navigate("settings") {
+                                                    popUpTo(navController.graph.startDestinationId) { saveState = true }
+                                                    launchSingleTop = true
+                                                    restoreState = true
+                                                }
+                                            }
+                                        }
                                     )
                                 }
                             }
@@ -87,7 +143,7 @@ class MainActivity : ComponentActivity() {
                             navController = navController, 
                             startDestination = "dashboard",
                             modifier = Modifier
-                                .padding(bottom = paddingValues.calculateBottomPadding())
+                                .padding(bottom = animatedBottomPadding)
                                 .consumeWindowInsets(WindowInsets.systemBars.only(WindowInsetsSides.Bottom))
                         ) {
                             composable("dashboard") {
@@ -99,11 +155,27 @@ class MainActivity : ComponentActivity() {
                             }
                             composable("monthly") {
                                 MonthlyBreakdownScreen(
-                                    viewModel = viewModel
+                                    viewModel = viewModel,
+                                    onNavigateToCategoryDetails = { categoryName, isIncome -> 
+                                        navController.navigate("category_details/$categoryName/$isIncome") 
+                                    }
+                                )
+                            }
+                            composable("category_details/{categoryName}/{isIncome}") { backStackEntry ->
+                                val categoryName = backStackEntry.arguments?.getString("categoryName") ?: ""
+                                val isIncomeStr = backStackEntry.arguments?.getString("isIncome") ?: "false"
+                                val isIncome = isIncomeStr.toBooleanStrictOrNull() ?: false
+                                com.example.moneymanager.ui.screens.CategoryDetailsScreen(
+                                    viewModel = viewModel,
+                                    categoryName = categoryName,
+                                    isIncome = isIncome,
+                                    onBack = { navController.popBackStack() },
+                                    onNavigateToEditTransaction = { id -> navController.navigate("edit/$id") }
                                 )
                             }
                             composable("settings") {
                                 SettingsScreen(
+                                    viewModel = viewModel,
                                     onNavigateToBulkAdd = { navController.navigate("bulk") },
                                     onNavigateToCategories = { navController.navigate("categories") },
                                     onNavigateToScheduled = { navController.navigate("scheduled") },

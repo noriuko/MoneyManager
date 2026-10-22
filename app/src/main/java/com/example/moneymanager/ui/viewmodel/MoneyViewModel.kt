@@ -3,9 +3,16 @@ package com.example.moneymanager.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.moneymanager.core.data.Transaction
-import com.example.moneymanager.core.data.TransactionType
 import com.example.moneymanager.core.data.ScheduledTransaction
 import com.example.moneymanager.core.repository.MoneyRepository
+import com.example.moneymanager.core.data.TransactionType
+import com.example.moneymanager.core.util.FormatUtils
+import com.example.moneymanager.ui.viewmodel.DailyTransactionGroup
+import com.example.moneymanager.ui.viewmodel.TransactionUiModel
+import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,11 +26,21 @@ import kotlinx.coroutines.launch
 import java.util.Calendar
 import javax.inject.Inject
 
+import com.example.moneymanager.core.repository.UserPreferencesRepository
+import com.example.moneymanager.core.repository.ThemeMode
+
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class MoneyViewModel @Inject constructor(
-    private val repository: MoneyRepository
+    private val repository: MoneyRepository,
+    private val userPreferencesRepository: UserPreferencesRepository
 ) : ViewModel() {
+
+    val themeMode: StateFlow<ThemeMode> = userPreferencesRepository.themeMode
+
+    fun setThemeMode(mode: ThemeMode) {
+        userPreferencesRepository.setThemeMode(mode)
+    }
 
     init {
         viewModelScope.launch {
@@ -66,6 +83,64 @@ class MoneyViewModel @Inject constructor(
     val transactionsForSelectedMonth = currentMonthRange.flatMapLatest { (start, end) ->
         repository.getTransactionsBetween(start, end)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val groupedTransactionsForSelectedMonth = transactionsForSelectedMonth.map { transactions ->
+        if (transactions.isEmpty()) return@map emptyList()
+
+        val cal = Calendar.getInstance()
+        val locale = Locale.getDefault()
+
+        transactions
+            .sortedByDescending { it.timestamp }
+            .groupBy { transaction ->
+                cal.timeInMillis = transaction.timestamp
+                cal.set(Calendar.HOUR_OF_DAY, 0)
+                cal.set(Calendar.MINUTE, 0)
+                cal.set(Calendar.SECOND, 0)
+                cal.set(Calendar.MILLISECOND, 0)
+                cal.timeInMillis
+            }
+            .map { (dayStartMillis, dayTxList) ->
+                var dailyInc = 0.0
+                var dailyExp = 0.0
+
+                val uiModels = dayTxList.map { tx ->
+                    val isInc = tx.type == TransactionType.INCOME
+                    if (isInc) dailyInc += tx.amount else dailyExp += tx.amount
+
+                    val timeStr = FormatUtils.formatTime(tx.timestamp)
+                    val subtitle = if (tx.description.isNotBlank()) {
+                        "$timeStr • ${tx.description}"
+                    } else {
+                        timeStr
+                    }
+
+                    TransactionUiModel(
+                        transaction = tx,
+                        id = tx.id,
+                        name = tx.name,
+                        subtitle = subtitle,
+                        formattedAmount = String.format(locale, "%s€%.2f", if (isInc) "+" else "-", tx.amount),
+                        category = tx.category,
+                        isIncome = isInc
+                    )
+                }
+
+                DailyTransactionGroup(
+                    dateMillis = dayStartMillis,
+                    dayOfMonth = FormatUtils.formatDay(dayStartMillis),
+                    dayOfWeek = FormatUtils.formatDayOfWeek(dayStartMillis),
+                    monthYear = FormatUtils.formatMonthYear(dayStartMillis),
+                    formattedDailyIncome = if (dailyInc > 0) String.format(locale, "+€%.2f", dailyInc) else null,
+                    formattedDailyExpense = if (dailyExp > 0) String.format(locale, "-€%.2f", dailyExp) else null,
+                    transactions = uiModels
+                )
+            }
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val monthlyIncomeForSelectedMonth = transactionsForSelectedMonth.map { transactions ->
+        transactions.sumOf { if (it.type == TransactionType.INCOME) it.amount else 0.0 }
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
     val spendingsForSelectedMonth = currentMonthRange.flatMapLatest { (start, end) ->
         repository.getSpendingsBetween(start, end)

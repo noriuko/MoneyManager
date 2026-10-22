@@ -189,7 +189,8 @@ class MoneyRepository @Inject constructor(
             
             val totalIncome = moneyDao.getTotalIncomeBefore(endOfMonth.timeInMillis) ?: 0.0
             val totalExpense = moneyDao.getTotalExpenseBefore(endOfMonth.timeInMillis) ?: 0.0
-            val balance = totalIncome - totalExpense
+            val rawBalance = totalIncome - totalExpense
+            val balance = Math.round(rawBalance * 100.0) / 100.0
 
             if (balance > 0) {
                 if (existingLeftovers.isEmpty()) {

@@ -23,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.moneymanager.core.data.ScheduledTransaction
+import com.example.moneymanager.ui.theme.IncomeGreen
 import com.example.moneymanager.core.data.TransactionType
 import com.example.moneymanager.ui.viewmodel.MoneyViewModel
 import java.util.Locale
@@ -128,7 +129,7 @@ fun ScheduledTransactionItem(
     onDelete: () -> Unit
 ) {
     val isIncome = scheduledTransaction.type == TransactionType.INCOME
-    val amountColor = if (isIncome) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error
+    val amountColor = if (isIncome) IncomeGreen else MaterialTheme.colorScheme.error
     val iconBgColor = amountColor.copy(alpha = 0.12f)
 
     Card(

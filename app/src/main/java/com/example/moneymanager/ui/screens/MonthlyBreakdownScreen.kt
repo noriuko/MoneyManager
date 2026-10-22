@@ -4,6 +4,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -14,6 +15,7 @@ import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -25,8 +27,10 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.example.moneymanager.core.data.TransactionType
+import com.example.moneymanager.core.util.FormatUtils
+import com.example.moneymanager.ui.theme.IncomeGreen
 import com.example.moneymanager.ui.viewmodel.MoneyViewModel
-import java.text.SimpleDateFormat
 import java.util.Locale
 
 val categoryColors = listOf(
@@ -44,59 +48,95 @@ val categoryColors = listOf(
     Color(0xFFA1887F)  // Brown
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun MonthlyBreakdownScreen(viewModel: MoneyViewModel) {
-    val currentCalendar by viewModel.currentCalendar.collectAsState()
-    val rawCategoryBreakdown by viewModel.categoryBreakdownForSelectedMonth.collectAsState()
-    val totalSpendings by viewModel.spendingsForSelectedMonth.collectAsState()
+private val CardCornerShape = RoundedCornerShape(12.dp)
+private val IndicatorCornerShape = RoundedCornerShape(3.dp)
 
-    // Sort descending by amount so highest expenses are always first
-    val categoryBreakdown = remember(rawCategoryBreakdown) {
-        rawCategoryBreakdown.sortedByDescending { it.second }
+@Composable
+fun MonthlyBreakdownScreen(
+    viewModel: MoneyViewModel,
+    onNavigateToCategoryDetails: (String, Boolean) -> Unit
+) {
+    val currentCalendar by viewModel.currentCalendar.collectAsState()
+    val transactions by viewModel.transactionsForSelectedMonth.collectAsState()
+    val locale = remember { Locale.getDefault() }
+
+    var isIncomeTab by rememberSaveable { mutableStateOf(false) }
+
+    val categoryBreakdown = remember(transactions, isIncomeTab) {
+        val targetType = if (isIncomeTab) TransactionType.INCOME else TransactionType.EXPENSE
+        transactions.filter { it.type == targetType }
+            .groupBy { it.category }
+            .mapValues { entry -> entry.value.sumOf { it.amount } }
+            .toList()
+            .sortedByDescending { it.second }
     }
 
-    val monthFormat = remember { SimpleDateFormat("MMMM yyyy", Locale.getDefault()) }
+    val totalAmount = remember(categoryBreakdown) {
+        categoryBreakdown.sumOf { it.second }
+    }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Monthly Breakdown") }
-            )
-        }
-    ) { padding ->
+    Scaffold { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
+                .padding(bottom = padding.calculateBottomPadding())
+                .statusBarsPadding() // Snaps content immediately below the status bar
         ) {
-            // Month Navigation
-            Surface(
-                tonalElevation = 2.dp,
+            // Compact Header: Month Navigation + Screen Title
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                shape = RoundedCornerShape(12.dp)
+                    .padding(start = 8.dp, end = 16.dp, top = 2.dp, bottom = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
+                // Nested Row containing the month selector to match DashboardScreen exactly
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp, horizontal = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    IconButton(onClick = { viewModel.previousMonth() }) {
+                    IconButton(
+                        onClick = viewModel::previousMonth,
+                        modifier = Modifier.size(36.dp)
+                    ) {
                         Icon(Icons.Default.ChevronLeft, contentDescription = "Previous Month")
                     }
                     Text(
-                        text = monthFormat.format(currentCalendar.time),
+                        text = FormatUtils.formatShortMonthYear(currentCalendar.timeInMillis),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
-                    IconButton(onClick = { viewModel.nextMonth() }) {
+                    IconButton(
+                        onClick = viewModel::nextMonth,
+                        modifier = Modifier.size(36.dp)
+                    ) {
                         Icon(Icons.Default.ChevronRight, contentDescription = "Next Month")
                     }
                 }
+
+                Text(
+                    text = "Monthly Breakdown",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            // Income / Expense Toggle
+            PrimaryTabRow(
+                selectedTabIndex = if (isIncomeTab) 1 else 0,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Tab(
+                    selected = !isIncomeTab,
+                    onClick = { isIncomeTab = false },
+                    text = { Text("Spendings") }
+                )
+                Tab(
+                    selected = isIncomeTab,
+                    onClick = { isIncomeTab = true },
+                    text = { Text("Income") }
+                )
             }
 
             if (categoryBreakdown.isEmpty()) {
@@ -105,69 +145,78 @@ fun MonthlyBreakdownScreen(viewModel: MoneyViewModel) {
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "No expenses for this month.",
+                        text = if (isIncomeTab) "No income for this month." else "No expenses for this month.",
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             } else {
+                val currentOnNavigateToCategory by rememberUpdatedState(onNavigateToCategoryDetails)
+                val onItemClick = remember(isIncomeTab) { { cat: String -> currentOnNavigateToCategory(cat, isIncomeTab) } }
+
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 88.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Chart Header Item
-                    item {
+                    // Donut Chart Header Item
+                    item(key = "chart_header", contentType = "chart") {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 16.dp),
+                                .padding(vertical = 12.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             DonutChart(
                                 data = categoryBreakdown,
-                                total = totalSpendings,
+                                total = totalAmount,
                                 colors = categoryColors,
-                                modifier = Modifier.size(220.dp)
+                                modifier = Modifier.size(200.dp)
                             )
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(
-                                    text = "Total Spent",
+                                    text = if (isIncomeTab) "Total Income" else "Total Spent",
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    text = String.format(Locale.getDefault(), "€%.2f", totalSpendings),
+                                    text = String.format(locale, "€%.2f", totalAmount),
                                     style = MaterialTheme.typography.headlineSmall,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isIncomeTab) IncomeGreen else MaterialTheme.colorScheme.onSurface
                                 )
                             }
                         }
                     }
 
                     // Section Title
-                    item {
+                    item(key = "categories_title", contentType = "title") {
                         Text(
                             text = "Categories",
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
                         )
                     }
 
                     // Category List
                     itemsIndexed(
                         items = categoryBreakdown,
-                        key = { _, item -> item.first }
+                        key = { _, item -> item.first },
+                        contentType = { _, _ -> "category_card" }
                     ) { index, (category, amount) ->
-                        val percentage = if (totalSpendings > 0) (amount / totalSpendings).toFloat() else 0f
+                        val percentage = if (totalAmount > 0) (amount / totalAmount).toFloat() else 0f
                         val color = categoryColors[index % categoryColors.size]
 
                         CategoryCard(
                             category = category,
                             amount = amount,
                             percentage = percentage,
-                            color = color
+                            color = color,
+                            isIncome = isIncomeTab,
+                            locale = locale,
+                            onClick = { onItemClick(category) }
                         )
                     }
                 }
@@ -181,10 +230,17 @@ fun CategoryCard(
     category: String,
     amount: Double,
     percentage: Float,
-    color: Color
+    color: Color,
+    isIncome: Boolean,
+    locale: Locale,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = CardCornerShape,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
         ),
@@ -193,7 +249,7 @@ fun CategoryCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
+                .padding(horizontal = 14.dp, vertical = 10.dp) // Tightened compact padding
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -203,25 +259,25 @@ fun CategoryCard(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
-                            .size(12.dp)
+                            .size(10.dp)
                             .background(color, shape = CircleShape)
                     )
-                    Spacer(modifier = Modifier.width(10.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = category,
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold
                     )
                 }
                 Text(
-                    text = String.format(Locale.getDefault(), "€%.2f", amount),
-                    style = MaterialTheme.typography.bodyLarge,
+                    text = String.format(locale, "%s€%.2f", if (isIncome) "+" else "-", amount),
+                    style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.error
+                    color = if (isIncome) IncomeGreen else MaterialTheme.colorScheme.error
                 )
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -233,15 +289,15 @@ fun CategoryCard(
                     modifier = Modifier
                         .weight(1f)
                         .height(6.dp)
-                        .clip(RoundedCornerShape(3.dp)),
+                        .clip(IndicatorCornerShape),
                     color = color,
-                    trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f),
+                    trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
                     strokeCap = StrokeCap.Round
                 )
                 Spacer(modifier = Modifier.width(12.dp))
                 Text(
-                    text = String.format(Locale.getDefault(), "%.1f%%", percentage * 100),
-                    style = MaterialTheme.typography.labelMedium,
+                    text = String.format(locale, "%.1f%%", percentage * 100),
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -255,14 +311,14 @@ fun DonutChart(
     total: Double,
     colors: List<Color>,
     modifier: Modifier = Modifier,
-    strokeWidth: Dp = 28.dp
+    strokeWidth: Dp = 24.dp
 ) {
     val animationProgress = remember(data) { Animatable(0f) }
 
     LaunchedEffect(data) {
         animationProgress.animateTo(
             targetValue = 1f,
-            animationSpec = tween(durationMillis = 600)
+            animationSpec = tween(durationMillis = 500)
         )
     }
 
@@ -276,8 +332,7 @@ fun DonutChart(
         val arcSize = Size(diameter, diameter)
 
         var startAngle = -90f
-        // Leave a tiny gap between slices if there is more than 1 category
-        val gapAngle = if (data.size > 1) 2f else 0f
+        val gapAngle = if (data.size > 1) 2.5f else 0f
 
         data.forEachIndexed { index, pair ->
             val rawSweep = if (total > 0) ((pair.second / total) * 360f).toFloat() else 0f

@@ -9,6 +9,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
@@ -80,6 +81,8 @@ fun AddTransactionScreen(
     val parsedAmount = amount.replace(',', '.').toDoubleOrNull()
     val isFormValid = name.isNotBlank() && parsedAmount != null && parsedAmount > 0.0 && category.isNotBlank()
 
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -87,6 +90,17 @@ fun AddTransactionScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    if (transactionId != null) {
+                        IconButton(onClick = { showDeleteConfirm = true }) {
+                            Icon(
+                                imageVector = Icons.Outlined.Delete,
+                                contentDescription = "Delete",
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
                     }
                 }
             )
@@ -129,6 +143,31 @@ fun AddTransactionScreen(
             }
         }
     ) { padding ->
+        if (showDeleteConfirm && transactionId != null) {
+            AlertDialog(
+                onDismissRequest = { showDeleteConfirm = false },
+                title = { Text("Delete Transaction") },
+                text = { Text("Are you sure you want to delete this transaction?") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            viewModel.deleteTransaction(Transaction(id = transactionId, name = "", amount = 0.0, description = "", timestamp = 0L, category = "", type = com.example.moneymanager.core.data.TransactionType.EXPENSE))
+                            showDeleteConfirm = false
+                            onBack()
+                        },
+                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Text("Delete")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteConfirm = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
